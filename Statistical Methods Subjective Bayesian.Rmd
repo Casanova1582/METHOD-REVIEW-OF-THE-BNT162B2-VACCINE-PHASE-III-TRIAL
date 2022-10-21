@@ -1,0 +1,383 @@
+---
+title: "342 Final Paper Statistical Methods"
+author: "Chris Chen"
+date: "6/1/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Preliminaries
+
+
+```{r, message=FALSE}
+library(fastR2)
+library(tidyverse)
+library(dplyr)
+library(rootSolve)
+library(LearnBayes)
+library(HDInterval)
+```
+
+
+## Subjective Bayesian
+\
+\
+Suppose that X denotes the number of heart attacks in the vaccine group and Y in the control group, a reasonable model is X ~ Binom(17411, $\pi_1$) and Y ~ Binom(17511, $\pi_2$). The parameter of interest is the vaccine efficacy $$\psi=1 - \frac{\pi_1}{\pi_2}.$$ \
+
+Let W = X | X + Y = n. Using Poisson approximation we get W ~ $$Binom(n, \frac{n_1\pi_1}{n_1\pi_1 + n_2\pi_2})$$ where $n_1$ = 17411 and $n_2$ = 17511. \
+
+Since $n_1 \approx n_2$ due to 1:1 randomization, we approximately have $\theta = \frac{\pi_1}{\pi_1 + \pi_2}$ \
+
+Bayesian inference about $\theta$ can then be produced using a beta-binomial model; specifically, W ~ $Binom(162 + 8, \theta)$ and $g(\theta) = Beta(\alpha, \beta)$ \
+
+Notice that $\theta = \frac{\pi_1}{\pi_1 + \pi_2} = \frac{\frac{\pi_1}{\pi_2}}{\frac{\pi_1 + \pi_2}{\pi_2}} = \frac{1 - \psi}{\frac{\pi_1}{\pi_2} + 1} = \frac{1 - \psi}{1 - \psi + 1} = \frac{1 - \psi}{2 - \psi}$. Later we might need to shift from one to the other frequently. \
+
+To determine $\alpha$ and $\beta$ of the beta-prior on $\theta$, we will try 3 approaches: 
+First we speculate in the following manner: \
+1. The median of efficacy is 0. Thus $\theta$ has a median of 0.5 \
+2. The 95th percentile of efficacy is 0.3 (a pessimistic estimate). Thus the 5th percentile of $\theta$ is 0.4118.
+\
+\
+```{r}
+x <- 8
+n <- 170
+
+quantile1 <- list(p = 0.5, x = 0.5)
+quantile2 <- list(p = 0.05, x = 0.4118)
+params1 <- beta.select(quantile1, quantile2)
+
+alpha1 <- params1[1]
+beta1 <- params1[2]
+
+post_alpha1 <- x + alpha1
+post_beta1 <- n - x + beta1
+hdi1 <- HDInterval::hdi(qbeta, credMass = 0.95, shape1 = post_alpha1, shape2 = post_beta1)
+eti1 <- c(qbeta(0.025, shape1 = post_alpha1, shape2 = post_beta1), qbeta(0.975, shape1 = post_alpha1, shape2 = post_beta1))
+
+topsi <- function(theta) {
+  (1 - 2 * theta) / (1 - theta)
+}
+totheta <- function(psi) {
+  (1 - psi) / (2 - psi)
+}
+
+hdi_lower1 <- topsi(hdi1[2])
+hdi_upper1 <- topsi(hdi1[1])
+efficacy_hdi1 <- c(hdi_lower1, hdi_upper1); efficacy_hdi1
+
+eti_lower1 <- topsi(eti1[2])
+eti_upper1 <- topsi(eti1[1])
+efficacy_eti1 <- c(eti_lower1, eti_upper1); efficacy_eti1
+```
+\
+\
+Second we use the parameters provided by Pfitzer and BioNTech: $\alpha = 0.700102$ and $\beta = 1$\
+This comes from the thing P&B is trying to show: the vaccine efficacy $\psi$ is greater than 0.3. This corresponds to $\theta = 0.4118$.\
+Here's how they describe in their paper: "The prior is centered at $\theta = 0.4118$ ($\psi$ = 30%) which may be considered pessimistic." \
+Using $\alpha = 0.700102$ and $\beta = 1$, we can indeed get 0.4118 as the mean. \
+Then by solving $\mu = \frac{\alpha}{\alpha + \beta}$ we get $\alpha = \beta\frac{\mu}{1 - \mu}$; substituting the values $\mu = 0.4118, \beta = 1$ we get $\alpha = 0.700102$.
+\
+\
+```{r}
+params2 <- c(0.700102, 1)
+alpha2 <- params2[1]
+beta2 <- params2[2]
+
+post_alpha2 <- x + alpha2
+post_beta2 <- n - x + beta2
+hdi2 <- HDInterval::hdi(qbeta, credMass = 0.95, shape1 = post_alpha2, shape2 = post_beta2)
+eti2 <- c(qbeta(0.025, shape1 = post_alpha2, shape2 = post_beta2), qbeta(0.975, shape1 = post_alpha2, shape2 = post_beta2))
+
+hdi_lower2 <- topsi(hdi2[2])
+hdi_upper2 <- topsi(hdi2[1])
+efficacy_hdi2 <- c(hdi_lower2, hdi_upper2); efficacy_hdi2
+
+eti_lower2 <- topsi(eti2[2])
+eti_upper2 <- topsi(eti2[1])
+efficacy_eti2 <- c(eti_lower2, eti_upper2); efficacy_eti2
+```
+\
+\
+Thirdly, we can use parameters that satisfy the condition "prior is centered at $\theta = 0.4118$", but have the variance that equals that of a flat prior (a Beta(1, 1)), which is $\frac{1}{12}$. \
+Notice that var($\theta$) = $\frac{\alpha\beta}{(\alpha + \beta)^2(\alpha + \beta + 1)} = \frac{\alpha}{(\alpha + \beta)} \frac{\beta}{(\alpha + \beta)} \frac{1}{(\alpha + \beta + 1)} = \mu (1-\mu) \frac{1}{(\alpha + \beta + 1)} = \frac{1}{12}$ \ 
+Plug in the value of $\mu = 0.4118$, we get $\alpha + \beta + 1 = \frac{\frac{1}{12}}{0.4118 \cdot (1-0.4118)} = 2.90665$. \
+Thus $\alpha + \beta + 1 = \beta\frac{\mu}{1-\mu} + \beta + 1 = 2.90665$. \
+Solve the equation we have $1.700102\cdot\beta = 2.90665 - 1 = 1.90665$, $\beta = 1.121492$ and hence $\alpha = 2.90665 - 1 - 1.121492 = 0.785158$.
+\
+\
+```{r}
+alpha3 <- 0.785158
+beta3 <- 1.121492
+
+post_alpha3 <- x + alpha3
+post_beta3 <- n - x + beta3
+hdi3 <- HDInterval::hdi(qbeta, credMass = 0.95, shape1 = post_alpha3, shape2 = post_beta3)
+eti3 <- c(qbeta(0.025, shape1 = post_alpha3, shape2 = post_beta3), qbeta(0.975, shape1 = post_alpha3, shape2 = post_beta3))
+
+hdi_lower3 <- topsi(hdi3[2])
+hdi_upper3 <- topsi(hdi3[1])
+efficacy_hdi3 <- c(hdi_lower3, hdi_upper3); efficacy_hdi3
+
+eti_lower3 <- topsi(eti3[2])
+eti_upper3 <- topsi(eti3[1])
+efficacy_eti3 <- c(eti_lower3, eti_upper3); efficacy_eti3
+```
+\
+\
+```{r}
+# Flat Prior
+a1 <- 1
+b1 <- 1
+
+post_a1 <- x + a1
+post_b1 <- n - x + b1
+hdi4 <- HDInterval::hdi(qbeta, credMass = 0.95, shape1 = post_a1, shape2 = post_b1)
+eti4 <- c(qbeta(0.025, shape1 = post_a1, shape2 = post_b1), qbeta(0.975, shape1 = post_a1, shape2 = post_b1))
+
+hdi_lower4 <- topsi(hdi4[2])
+hdi_upper4 <- topsi(hdi4[1])
+efficacy_hdi4 <- c(hdi_lower4, hdi_upper4); efficacy_hdi4
+
+eti_lower4 <- topsi(eti4[2])
+eti_upper4 <- topsi(eti4[1])
+efficacy_eti4 <- c(eti_lower4, eti_upper4); efficacy_eti4
+```
+\
+\
+```{r}
+# Jeffery Prior
+a2 <- 0.5
+b2 <- 0.5
+
+post_a2 <- x + a2
+post_b2 <- n - x + b2
+hdi5 <- HDInterval::hdi(qbeta, credMass = 0.95, shape1 = post_a2, shape2 = post_b2)
+eti5 <- c(qbeta(0.025, shape1 = post_a2, shape2 = post_b2), qbeta(0.975, shape1 = post_a2, shape2 = post_b2))
+
+hdi_lower5 <- topsi(hdi5[2])
+hdi_upper5 <- topsi(hdi5[1])
+efficacy_hdi5 <- c(hdi_lower5, hdi_upper5); efficacy_hdi5
+
+eti_lower5 <- topsi(eti5[2])
+eti_upper5 <- topsi(eti5[1])
+efficacy_eti5 <- c(eti_lower5, eti_upper5); efficacy_eti5
+```
+\
+\
+
+## Results
+
+\
+\
+```{r}
+t <- seq(0, 1, 0.01)
+
+bayes.data1 <- data.frame(
+  theta <- t,
+  prior_1 <- dbeta(t, shape1 = a1, shape2 = b1), 
+  prior_2 <- dbeta(t, shape1 = a2, shape2 = b2),
+  likelihood <- dbinom(8, 170, t),
+  posterior_1 <- dbeta(t, shape1 = x + a1, shape2 = n - x + b1),
+  posterior_2 <- dbeta(t, shape1 = x + a2, shape2 = n - x + b2))
+
+ggplot(data = bayes.data1, mapping = aes(x = theta, y = prior_1, color = "flat prior")) +
+  geom_line() + ylab('density') +
+  geom_line(mapping = aes(x = theta, y = prior_2, color = "Jeffreys prior")) +
+  geom_line(mapping = aes(x = theta, y = 30 * likelihood, color = "likelihood")) +
+  geom_line(mapping = aes(x = theta, y = posterior_1, color = "flat posterior")) +
+  geom_line(mapping = aes(x = theta, y = posterior_2, color = "Jeffreys posterior")) +
+  scale_color_discrete(name = "Distribution") + 
+  labs(title = 'Posterior, likelihood, and prior of the vaccine study, uninformative priors')
+```
+\
+\
+For the uninformative priors, we are assuming that we do not have any prior information or beliefs about $\theta$ (or equivalently, vaccine efficacy), so the medians we get for $\psi$ should be very close to 95.1% (since $\theta = \frac{8}{170} = 0.0471$). We can see from our result table that the median from flat prior is 94.7%, and the median from Jeffery prior is 95.0%, close to 95.1% as expected.\
+Moreover, we can see that the flat prior and Jeffery prior are very similar: they are approximately flat all the way from 0 to 1, only that Jefferey prior has heavier density at both ends. Thus, the posterior distributions are almost the same except that their peaks differ by a little. As a result, the 95% credible intervals of $\psi$ produced by these priors are very close: flat prior has [90.1%, 97.5%] equal-tailed interval and [90.6%, 97.8%] highest density interval; Jeffery prior has [90.5%, 97.7%] equal-tailed interval and [91.0%, 98.0%] highest density interval.
+\
+\
+```{r}
+bayes.data2 <- data.frame(
+  theta <- t,
+  prior <- dbeta(t, shape1 = alpha1, shape2 = beta1), 
+  likelihood <- dbinom(8, 170, t),
+  posterior <- dbeta(t, shape = x + alpha1, shape2 = n - x + beta1) )
+
+ggplot(data = bayes.data2, mapping = aes(x = theta, y = prior, color = "prior")) +
+  geom_line() + ylab('density') +
+  geom_line(mapping = aes(x = theta, y = 30 * likelihood, color = "likelihood")) +
+  geom_line(mapping = aes(x = theta, y = posterior, color = "posterior")) +
+  scale_color_discrete(name = "Distribution") + 
+  labs(title = 'Posterior, likelihood, and prior of the vaccine study, own belief')
+```
+\
+\
+For the self-chosen beliefs, we are being very pessimistic because we are supposing that the median of efficacy is 0 and 95th percentile is 30%. This is the minimum requirement established by FDA and hence it's what we want to show the vaccine efficacy is 'at least better than'.\
+We can see the prior distribution, posterior distribution, and likelihood function have three unique peaks with the prior on the rightmost position and likelihood at the leftmost position. This is showing that the prior information is dragging the likelihood rightwards--after applying our prior beliefs about the parameter $\theta$, we now believe that theta should have larger values.\
+The 95% credible intervals of $\psi$ we get from this prior distribution are [66.6%, 82.0%] (equal-tailed) and [66.9%, 82.2%] (highest density), which are both very far from other intervals and does not include 95.1%. Intuitively this makes a lot of sense because it shows that our prior beliefs are very inconsistent with our sample--we were being too pessimistic; 95.1% lies to the right of the interval also indirectly suggests that our vaccine efficacy is greater than 30%.
+\
+\
+```{r}
+bayes.data3 <- data.frame(
+  theta <- t,
+  prior <- dbeta(t, shape1 = alpha2, shape2 = beta2), 
+  likelihood <- dbinom(8, 170, t),
+  posterior <- dbeta(t, shape = x + alpha2, shape2 = n - x + beta2) )
+
+ggplot(data = bayes.data3, mapping = aes(x = theta, y = prior, color = "prior")) +
+  geom_line() + ylab('density') +
+  geom_line(mapping = aes(x = theta, y = 30 * likelihood, color = "likelihood")) +
+  geom_line(mapping = aes(x = theta, y = posterior, color = "posterior")) +
+  scale_color_discrete(name = "Distribution") + 
+  labs(title = 'Posterior, likelihood, and prior of the vaccine study, P&B Parameters')
+```
+\
+\
+The weak prior provided by P&B ($\alpha = 0.700102, \beta = 1$) affects the likelihood function like an uninformative prior because it barely shifts the likelihood function in any direction. The 95% credible intervals for $\psi$ produced from this prior are [90.4%, 97.6%] (equal-tailed) and [90.8%, 97.9%] (highest density), very close to the intervals produced from uninformative priors; the median is 94.9%, also very close to the sample efficacy, 95.1%.
+\
+\
+```{r}
+alpha4 <- 0.6293
+beta4 <- 1
+bayes.data4 <- data.frame(
+  theta <- t,
+  prior <- dbeta(t, shape1 = alpha4, shape2 = beta4), 
+  likelihood <- dbinom(8, 170, t),
+  posterior <- dbeta(t, shape = x + alpha4, shape2 = n - x + beta4) )
+
+ggplot(data = bayes.data4, mapping = aes(x = theta, y = prior, color = "prior")) +
+  geom_line() + ylab('density') +
+  geom_line(mapping = aes(x = theta, y = 30 * likelihood, color = "likelihood")) +
+  geom_line(mapping = aes(x = theta, y = posterior, color = "posterior")) +
+  scale_color_discrete(name = "Distribution") + 
+  labs(title = 'Posterior, likelihood, and prior of Quantile Approach')
+```
+\
+\
+The weak prior calculated from the quantile approach ($\alpha = 0.384545, \beta = 0.5517$) affects the likelihood function like a Jeffreys prior because it barely shifts the likelihood function in any direction. The 95% credible interval for $\psi$ produced from this prior is [90.6%, 97.8%] and the median is 95.0%, also very close to the sample efficacy, 95.1%.
+\
+\
+table goes here
+\
+\
+```{r}
+approaches <- c('own belief', 'P&B params', 'alternative params', 'flat prior', 'Jefferey prior',
+                'likelihood ratio', 'Wald', 'Clopper Pearson')
+lowereti <- c(0.666, 0.904, 0.903, 0.901, 0.905, 0.906, 0.914, 0.900)
+uppereti <- c(0.820, 0.976, 0.976, 0.975, 0.977, 0.978, 0.985, 0.979)
+median <-  c(0.752, 0.949, 0.948, 0.947, 0.950, 0.951, 0.951, 0.951)
+etCIs <- data.frame(
+  approaches <- approaches,
+  lower <- lowereti,
+  upper <- uppereti,
+  median <- median
+)
+```
+
+```{r}
+pd <- position_dodge(0.78)
+ggplot(etCIs, aes(y=approaches)) +
+  geom_errorbar(data=etCIs, aes(xmin=lower, xmax=upper, color=approaches), width=.1, position=pd, size = 8) + 
+  geom_vline(xintercept = 0.950, linetype="dashed") +
+  geom_point(data=etCIs, aes(x=median), position=pd) +
+  xlim(0.62, 1) + 
+  xlab("Efficacy") +
+  ggtitle("95% CIs for Efficacy (Equal-Tailed for Bayesian Credible Intervals)") +
+  scale_color_brewer(palette="Set3") +
+  theme_bw() +
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+```
+\
+```{r}
+approaches <- c('own belief', 'P&B params', 'alternative params', 'flat prior', 'Jefferey prior',
+                'likelihood ratio', 'Wald', 'Clopper Pearson')
+lowerhdi <- c(0.669, 0.908, 0.908, 0.909, 0.910, 0.906, 0.914, 0.900)
+upperhdi <- c(0.822, 0.979, 0.979, 0.978, 0.980, 0.978, 0.985, 0.979)
+median <-  c(0.752, 0.949, 0.948, 0.947, 0.950, 0.951, 0.951, 0.951)
+hdCIs <- data.frame(
+  approaches <- approaches,
+  lower <- lowerhdi,
+  upper <- upperhdi,
+  median <- median
+)
+```
+
+```{r}
+pd <- position_dodge(0.78)
+ggplot(hdCIs, aes(y=approaches)) +
+  geom_errorbar(data=hdCIs, aes(xmin=lower, xmax=upper, color=approaches), width=.1, position=pd, size = 8) + 
+  geom_vline(xintercept = 0.950, linetype="dashed") +
+  geom_point(data=hdCIs, aes(x=median), position=pd) +
+  xlim(0.62, 1) + 
+  xlab("Efficacy") +
+  ggtitle("95% CIs for Efficacy (Highest Density for Bayesian Credibel Intervals") +
+  scale_color_brewer(palette="Set3") +
+  theme_bw() +
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+```
+\
+\
+Other than Bayesian Inferences, we also used frequentist approaches. Using likelihood ratio, we get a 95% confidence interval of $\psi$ that is [90.6%, 97.8%], which is very close to P&B's result. Wald's 95% confidence interval of $\psi$ is [91.4%, 98.5%], somewhat higher than P&B's result. Clopper-Pearson's method gives [90.0%, 97.9%], close to the P&B's 95% confidence interval of $\psi$: [90.3%, 97.6%]. This is likely due to the reason that the sample size is not very large, making Wald behave a little bit worse than the Clopper-Pearson's. 
+\
+\
+```{r, include=FALSE}
+# find max beta
+var_beta <- function(beta){
+  (0.4118 * beta ^ 2 / (1 - 0.4118)) / ((0.4118 * beta / (1 - 0.4118) + beta) ^ 2 * (0.4118 * beta / (1 - 0.4118) + beta + 1)) - (1/ 4) * (1 / (43.06 * 2 + 1))
+}
+
+beta_max <- uniroot.all(var_beta, lower = 0, upper = 100)
+```
+
+```{r, include=FALSE}
+# create dataframe
+n <- 170
+x <- 8
+betas <- seq(0.25, beta_max, 0.01)
+alphas <- 0.4118 * betas / (1 - 0.4118)
+variance <- alphas * betas / ((alphas + betas) ^ 2 * (alphas + betas + 1))
+
+post_betas <- n - x + betas
+post_alphas <- x + alphas
+
+hdilows <- c()  
+hdiups <- c()
+for (i in seq(1, length(post_betas), by = 1)) {
+  itv = HDInterval::hdi(qbeta, credMass = 0.95, shape1 = post_alphas[i], shape2 = post_betas[i])
+  hdilows <- c(hdilows, topsi(value(itv[2])))
+  hdiups <- c(hdiups, topsi(value(itv[1])))
+}
+
+intervals <- tibble(
+  betas = betas,
+  lowers = topsi(qbeta(0.975, shape1 = post_alphas, shape2 = post_betas)),
+  uppers = topsi(qbeta(0.025, shape1 = post_alphas, shape2 = post_betas)),
+  medians = topsi(qbeta(0.5, shape1 = post_alphas, shape2 = post_betas)),
+  vars = variance,
+  hdilows = hdilows,
+  hdiups = hdiups
+)
+```
+
+```{r, echo=FALSE}
+cols <- c('equal-tailed' = "dodgerblue1", "highest density" = "darksalmon")
+fills <- c('equal-tailed' = "lightblue", "highest density" = "chocolate2")
+ggplot(data=intervals, aes(x=vars, y=medians)) +
+  geom_ribbon(data = intervals, aes(ymin=lowers, ymax=uppers, colour = 'equal-tailed', fill = 'equal-tailed'), linetype = 5, alpha=0.4) +
+  geom_ribbon(data = intervals, aes(ymin=hdilows, ymax=hdiups, colour = 'highest density', fill = 'highest density'), linetype = 5, alpha=0.2) +
+  geom_line(data=intervals, aes(x=vars, y=medians)) +
+  ylab('efficacy') +
+  xlab('variance') +
+  scale_color_manual(name = 'credible intervals', values = cols) + 
+  scale_fill_manual(name = "credible intervals", values = fills)
+```
+
+
+

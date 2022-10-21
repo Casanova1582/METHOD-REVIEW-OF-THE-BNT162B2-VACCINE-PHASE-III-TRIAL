@@ -1,0 +1,11 @@
+﻿approach,low,up
+own belief,0.666,0.82
+P&B params,0.904,0.976
+alternative params,0.903,0.976
+flat prior,0.901,0.975
+Jefferey prior,0.905,0.977
+likelihood ratio,0.906,0.978
+Wald,0.914,0.985
+Wilson Score,0.901,0.975
+Plus4,0.899,0.977
+Clopper Pearson,0.9,0.979
